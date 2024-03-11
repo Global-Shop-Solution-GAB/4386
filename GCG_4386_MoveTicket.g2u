@@ -1,0 +1,210 @@
+Program.Sub.Preflight.Start
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.SetErrorHandler("Main_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+F.ODBC.connection!con.OpenConnection(V.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+
+Function.Intrinsic.Control.If(V.Caller.Hook, =, "15890")
+	'close single job
+	Function.Intrinsic.Control.CallSub(transfer)
+Function.Intrinsic.Control.ElseIf(V.Caller.Hook, =, "15915")
+	'closes multiple jobs: hook fires each time
+	Function.Intrinsic.Control.CallSub(transfer)
+Function.Intrinsic.Control.Else
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Main_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4386_MoveTicket.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.Main.End
+
+Program.Sub.Unload.Start
+F.Intrinsic.Control.SetErrorHandler("Unload_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+F.ODBC.Connection!con.Close
+F.Intrinsic.Control.End
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Unload_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4386_MoveTicket.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.End
+
+Function.Intrinsic.Control.EndIf
+Program.Sub.Unload.End
+
+Program.Sub.Transfer.Start
+F.Intrinsic.Control.SetErrorHandler("Transfer_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+V.Local..BulkDeclareString(sGood, sScrap, sJob, sSuffix,sSeq, sWC, sFilePath, sFileName, sPart, sFromLoc, sFromBin, sToBin, sLot,sHeat, sSerial, sToLoc, sFinal, sQTY, sRet, ssql, sLine,sDate, sTemp)
+V.Local.bExists.Declare(Boolean)
+V.Local.iC.Declare(Long)
+
+'set variables
+V.Local.sGood.Set(V.Passed.000001)
+V.Local.sScrap.Set(V.Passed.000002)
+V.Local.sTemp.Set(V.Passed.000004)
+F.Intrinsic.String.Left(V.Local.sTemp, 6, V.Local.sJob)
+V.Local.sJob.Set(V.Passed.009990)
+V.Local.sSuffix.Set(V.Passed.009991)
+V.Local.sSeq.Set(V.Passed.000005)
+F.Intrinsic.String.LPad(V.Local.sSeq, "0", 6, V.Local.sSeq)
+
+
+'get current WC
+F.Intrinsic.String.Build("Select Top 1 Part From Job_Operations Where LMO = 'L' And Job = '{0}' And Suffix = '{1}' And Seq = '{2}' Order By SUFFIX, SEQ ASC", V.Local.sJob, V.Local.sSuffix,V.Local.sSeq, V.Local.ssql)
+Function.ODBC.Connection!con.ExecuteAndReturn(V.Local.ssql, V.Local.sWC)
+
+
+'check that the bin exists and enough QTY
+Function.Intrinsic.Control.CallSub(checkqtyexists, "sWC",V.Local.sWC, "sJob", V.Local.sJob, "sSeq", V.Local.sSeq, "sGood", V.Local.sGood)
+
+'get the next WC
+F.Intrinsic.String.Build("Select Top 1 Part From Job_Operations Where LMO = 'L' And Job = '{0}' And Seq > '{1}' Order By SEQ ASC", V.Local.sJob, V.Local.sSeq, V.Local.ssql)
+Function.ODBC.Connection!con.ExecuteAndReturn(V.Local.ssql, V.Local.sRet)
+Function.Intrinsic.Control.If(V.Local.sRet, =, "")
+	'then we are at the end of the labor sequence
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.Else
+	'make sure the bin exist
+	Function.Intrinsic.Control.CallSub(checkbinexists, "sRet", V.Local.sRet)
+Function.Intrinsic.Control.EndIf
+
+'set the date and format it
+V.Local.sdate.Set(v.Ambient.Date)
+F.Intrinsic.String.Format(V.Local.sDate,"YYYYMMDD",V.Local.sDate)
+
+'create the filepath and name
+F.Intrinsic.String.Build("W{0}{1}{2}",V.Caller.CompanyCode,V.Caller.Terminal,"BIN2BINTRNS",V.Local.sFileName)
+'build the filepath
+F.Intrinsic.String.Build("{0}\{1}",V.caller.FilesDir,V.Local.sFileName,V.Local.sFilePath)
+
+F.Intrinsic.Control.For(V.Local.iC, 0, V.DataTable.Mat.RowCount--, 1)
+	V.Local.sQTY.Set(V.DataTable.Mat(V.Local.iC).QtyToTransfer!FieldValTrim)
+	V.Local.sPart.Set(V.DataTable.Mat(V.Local.iC).Part!FieldValTrim)
+	F.Intrinsic.String.RPad(V.Local.sPart, " ", 20, V.Local.sPart)
+	V.Local.sFromLoc.Set("")
+	V.local.sToBin.Set(V.Local.sRet)
+	V.Local.sLot.Set("")
+	V.Local.sHeat.Set("")
+	V.Local.sSerial.Set("")
+	V.local.sToLoc.Set("")
+	'build string
+	F.Intrinsic.Control.If(v.Local.sfinal,=,"")
+		F.Intrinsic.String.Build("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}",V.Local.sPart,V.Local.sFromLoc.Trim,V.Local.sQTY.Trim,V.Local.sWC.Trim,V.Local.sRet.Trim,V.Local.sLot.Trim,V.Local.sHeat.Trim,V.Local.sSerial.Trim,"","",V.local.sToLoc.Trim,"Y","SUPERVSR",V.local.sDate,V.local.sFinal)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.String.Build("{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12},{13}",V.Local.spart,V.Local.sFromLoc.Trim,V.Local.sQTY.Trim,V.Local.sWC.Trim,V.Local.sRet.Trim,V.Local.sLot.Trim,V.Local.sheat.Trim,V.Local.sSerial.Trim,"","",V.local.sToLoc.Trim,"Y","SUPERVSR",V.local.sDate,V.local.sLine)
+		F.Intrinsic.String.Build("{0}{1}{2}",V.Local.sFinal,V.Ambient.NewLine,V.Local.sLine,V.Local.sFinal)
+	F.Intrinsic.Control.endif
+F.Intrinsic.Control.Next(V.Local.iC)
+
+'Create file	
+F.Intrinsic.file.String2File(V.local.sfilepath,V.Local.sFinal)
+
+'upload
+F.Intrinsic.Task.LaunchGSSSync("LOT054UP","-c",V.Local.sFileName)
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("Transfer_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4386_MoveTicket.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.Transfer.End
+
+Program.Sub.CheckQTYExists.Start
+F.Intrinsic.Control.SetErrorHandler("CheckBinExists_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+V.Local..BulkDeclareString(ssql, sFilter)
+
+'return list of job materials
+F.Intrinsic.String.Build("Select Part, Units, '' as Qty, '' as BIN From Job_Operations Where Job = '{0}' And LMO = 'M'", V.Args.sJob, V.Local.ssql)
+F.Data.DataTable.CreateFromSQL("Mat", "con", V.Local.ssql, TRUE)
+'add WC column 
+Function.Data.DataTable.SetValue("Mat", -1, "BIN", V.Args.sWC)
+
+Function.Data.DataTable.AddExpressionColumn("Mat", "GoodPieces", "Float", V.Args.sGood)
+
+Function.Data.DataTable.AddExpressionColumn("Mat", "QtyToTransfer", "String", "[Units]*[GoodPieces]")
+
+F.Intrinsic.String.Build("Select Part,QUANTITY as QTY From Item_Master Where Bin = '{0}'", V.Args.sWC.Trim, V.Local.ssql)
+F.Data.Dictionary.CreateFromSQL("dict", "con",V.Local.ssql)
+Function.Data.Dictionary.SetDefaultReturn("dict", -1)
+Function.Data.DataTable.FillFromDictionary("Mat", "dict", "Part", "Qty")
+F.Data.Dictionary.Close("dict")
+
+'check the part and amount exist
+Function.Data.DataTable.AddExpressionColumn("Mat", "Exist", "String", "IIF(Qty >= QtyToTransfer, 'Y', 'N')")
+
+V.Local.sFilter.Set("Exist = 'N'")
+Function.Data.DataView.Create("Mat", "Mat_V", 22,V.Local.sFilter, "")
+
+Function.Intrinsic.Control.If(Variable.DataView.Mat!Mat_V.RowCount, >, 0)
+	F.Intrinsic.UI.Msgbox("Quantity does not exist in Current Bin")
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("CheckBinExists_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4386_MoveTicket.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+Program.Sub.CheckQTYExists.End
+
+Program.Sub.CheckBinExists.Start
+F.Intrinsic.Control.SetErrorHandler("CheckBinExists_Err")
+F.Intrinsic.Control.ClearErrors
+
+V.Local.sError.Declare(String)
+
+V.Local..BulkDeclareString(ssql, sTemp)
+F.Intrinsic.String.Build("Select Bin From BIN_MASTER Where BIN = '{0}'", V.Args.sRet, V.Local.ssql)
+Function.ODBC.Connection!con.ExecuteAndReturn(V.Local.ssql, V.Local.sTemp)
+Function.Intrinsic.Control.If(V.Local.sTemp, =, "")
+	'Bin DNE- exit program
+	F.Intrinsic.UI.Msgbox("The next BIN does not Exist")
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.ExitSub
+
+F.Intrinsic.Control.Label("CheckBinExists_Err")
+F.Intrinsic.Control.If(V.Ambient.ErrorNumber,<>,0)
+	Function.Intrinsic.String.Concat("Project: GCG_4386_MoveTicket.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",V.Ambient.CurrentSubroutine,V.Ambient.NewLine,"Error Occurred ",V.Ambient.ErrorNumber," with description ",V.Ambient.ErrorDescription,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	Function.Intrinsic.Control.CallSub(unload)
+Function.Intrinsic.Control.EndIf
+
+Program.Sub.CheckBinExists.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$DH1$}$2/23/2017 3:43:39 PM$}$False
+Program.Sub.Comments.End
